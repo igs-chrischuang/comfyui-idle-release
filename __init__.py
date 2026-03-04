@@ -19,6 +19,7 @@ class VRAMClearer:
     def __init__(self):
         self.idle_time = 0
         self.last_memory_allocated = -1
+        self.last_history_keys = set()
         self.thread = threading.Thread(target=self.monitor_loop, daemon=True)
         self.thread.start()
         logger.info("[comfyui-idle-release] Plugin loaded. Monitoring GPU VRAM...")
@@ -87,13 +88,28 @@ class VRAMClearer:
     def check_is_processing(self):
         # 詢問 ComfyUI 的提示詞佇列狀態，確認是否正在執行任務
         try:
-            url = self.get_api_base_url() + "/api/prompt"
-            req = urllib.request.Request(url, method="GET")
-            with urllib.request.urlopen(req) as response:
+            url = self.get_api_base_url()
+            req_prompt = urllib.request.Request(url + "/api/prompt", method="GET")
+            with urllib.request.urlopen(req_prompt) as response:
                 result = json.loads(response.read().decode('utf-8'))
                 # 如果 queue_remaining > 0 代表還有任務在排隊或執行中
                 if result.get('exec_info', {}).get('queue_remaining', 0) > 0:
                     return True
+
+            # 另外檢查歷史紀錄：看這 5 秒內有沒有剛執行完的任務
+            req_history = urllib.request.Request(url + "/api/history", method="GET")
+            with urllib.request.urlopen(req_history) as response:
+                history_data = json.loads(response.read().decode('utf-8'))
+                current_history_keys = set(history_data.keys())
+                
+                # 如果歷史紀錄有新增，代表這 5 秒內有任務跑完了 (即使時間很短)
+                if not current_history_keys.issubset(self.last_history_keys):
+                    self.last_history_keys = current_history_keys
+                    return True
+                
+                # 更新歷史紀錄的已知 state
+                self.last_history_keys = current_history_keys
+
         except Exception as e:
             pass
         return False
