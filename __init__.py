@@ -4,6 +4,7 @@ import torch
 import logging
 import json
 import urllib.request
+import sys
 import comfy.model_management
 
 # 設定 logger
@@ -50,10 +51,37 @@ class VRAMClearer:
             except Exception as e:
                 logger.error(f"[comfyui-idle-release] Error during monitoring: {e}", exc_info=True)
 
+    def get_api_url(self):
+        port = 8188  # ComfyUI 預設 port
+        host = "127.0.0.1"
+
+        # 嘗試從全域參數解析 --port
+        try:
+            from comfy.cli_args import args
+            if hasattr(args, 'port'):
+                port = args.port
+        except Exception:
+            pass
+
+        # 如果上方方法失敗，備用手動解析 sys.argv
+        if port == 8188:
+            for i, arg in enumerate(sys.argv):
+                if arg == '--port' and i + 1 < len(sys.argv):
+                    try:
+                        port = int(sys.argv[i+1])
+                    except ValueError:
+                        pass
+                elif arg == '--listen':
+                    # 如果使用者有指定 --listen 但沒給參數，通常預設綁定 0.0.0.0 
+                    # 不管綁定哪個 IP，對本地發送請求使用 127.0.0.1 通常都是最安全的
+                    pass
+
+        return f"http://{host}:{port}/api/free"
+
     def clear_vram(self):
         try:
             # 透過 API 呼叫清除 VRAM 以達到完整釋放
-            url = "http://localhost:12000/api/free"
+            url = self.get_api_url()
             data = json.dumps({"unload_models": True, "free_memory": True}).encode("utf-8")
             req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
             
