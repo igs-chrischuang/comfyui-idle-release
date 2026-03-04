@@ -31,10 +31,18 @@ class VRAMClearer:
                 continue
 
             try:
+                # 檢查 ComfyUI 是否有代辦任務
+                if self.check_is_processing():
+                    self.idle_time = 0
+                    self.last_memory_allocated = torch.cuda.memory_allocated()
+                    continue
+
                 # 取得當前已分配的 VRAM
                 current_memory = torch.cuda.memory_allocated()
                 
-                # 如果 VRAM 佔用沒有變化，且大於 0（代表有模型載入），則視為閒置
+                # 判定閒置條件：
+                # 1. ComfyUI 沒有在執行任務 (上面已攔截)
+                # 2. VRAM 佔用沒有變化，且大於 0（代表有模型載入）
                 if current_memory == self.last_memory_allocated and current_memory > 0:
                     self.idle_time += CHECK_INTERVAL
                 else:
@@ -51,7 +59,7 @@ class VRAMClearer:
             except Exception as e:
                 logger.error(f"[comfyui-idle-release] Error during monitoring: {e}", exc_info=True)
 
-    def get_api_url(self):
+    def get_api_base_url(self):
         port = 8188  # ComfyUI 預設 port
         host = "127.0.0.1"
 
@@ -72,11 +80,26 @@ class VRAMClearer:
                     except ValueError:
                         pass
                 elif arg == '--listen':
-                    # 如果使用者有指定 --listen 但沒給參數，通常預設綁定 0.0.0.0 
-                    # 不管綁定哪個 IP，對本地發送請求使用 127.0.0.1 通常都是最安全的
                     pass
 
-        return f"http://{host}:{port}/api/free"
+        return f"http://{host}:{port}"
+
+    def check_is_processing(self):
+        # 詢問 ComfyUI 的提示詞佇列狀態，確認是否正在執行任務
+        try:
+            url = self.get_api_base_url() + "/api/prompt"
+            req = urllib.request.Request(url, method="GET")
+            with urllib.request.urlopen(req) as response:
+                result = json.loads(response.read().decode('utf-8'))
+                # 如果 queue_remaining > 0 代表還有任務在排隊或執行中
+                if result.get('exec_info', {}).get('queue_remaining', 0) > 0:
+                    return True
+        except Exception as e:
+            pass
+        return False
+
+    def get_api_url(self):
+        return self.get_api_base_url() + "/api/free"
 
     def clear_vram(self):
         try:
