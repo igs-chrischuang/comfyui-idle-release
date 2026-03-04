@@ -2,6 +2,8 @@ import threading
 import time
 import torch
 import logging
+import json
+import urllib.request
 import comfy.model_management
 
 # 設定 logger
@@ -50,13 +52,17 @@ class VRAMClearer:
 
     def clear_vram(self):
         try:
-            # 卸載所有模型
-            comfy.model_management.unload_all_models()
-            # 清除 PyTorch 的 VRAM 緩存
-            comfy.model_management.soft_empty_cache()
-            logger.info("[comfyui-idle-release] VRAM cleared successfully.")
+            # 透過 API 呼叫清除 VRAM 以達到完整釋放
+            url = "http://localhost:12000/api/free"
+            data = json.dumps({"unload_models": True, "free_memory": True}).encode("utf-8")
+            req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
+            
+            with urllib.request.urlopen(req) as response:
+                result = response.read()
+                
+            logger.info("[comfyui-idle-release] VRAM cleared successfully via API.")
         except Exception as e:
-            logger.error(f"[comfyui-idle-release] Failed to clear VRAM: {e}", exc_info=True)
+            logger.error(f"[comfyui-idle-release] Failed to clear VRAM via API: {e}", exc_info=True)
 
 # 啟動監控
 monitor = VRAMClearer()
